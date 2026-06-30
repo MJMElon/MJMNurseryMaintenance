@@ -742,6 +742,17 @@ function renderPD() {
     h+=`<th class="hdr-input-cell sticker-bg">${mkSel(PD_STICKER_OPTIONS,c.D_sticker,`updatePDChem('${w}','D_sticker',this.value)`)}${mkDose(c.D_sticker_dose,c.D_sticker_unit,`updatePDDose('${w}','D_sticker_dose',+this.value)`)}</th>`;
   });
   h+='</tr></thead><tbody>';
+
+  // Select-all row (toggle every plot in that column at once)
+  h+='<tr class="select-all-tr"><td style="text-align:right;font-size:10px;color:#666;font-weight:600;padding-right:8px;letter-spacing:.3px">Select All →</td>';
+  W.forEach(w=>{
+    const allP = plots.every(p => s.pd[w]?.[p]?.P);
+    const allD = plots.every(p => s.pd[w]?.[p]?.D);
+    h+=`<td class="check-td${allP?' ticked':''}" style="background:#eef6ff" onclick="toggleAllPD('${w}','P')" title="Select all P for ${w}">${allP?'☑':'☐'}</td>`;
+    h+=`<td class="check-td${allD?' ticked':''}" style="background:#eef6ff" onclick="toggleAllPD('${w}','D')" title="Select all D for ${w}">${allD?'☑':'☐'}</td>`;
+  });
+  h+='</tr>';
+
   const saved = getSavedPdSnapshot(s);
   plots.forEach(plot=>{
     h+=`<tr><td class="plot-td">${plot}</td>`;
@@ -803,6 +814,19 @@ function togPD(n,m,w,plot,type,el){
   if(!s.pd[w][plot]) s.pd[w][plot]={P:false,D:false};
   s.pd[w][plot][type]=!s.pd[w][plot][type];
   renderPD();          // full re-render so 'modified' class updates correctly
+  autoSyncRecords();
+}
+
+function toggleAllPD(w, type){
+  if(!canEditSchedule) return;
+  const n=getNursery(), m=getMonth(), s=getState(n,m);
+  const plots=NURSERY_PLOTS[n];
+  const allTicked = plots.every(p => s.pd[w]?.[p]?.[type]);
+  plots.forEach(p => {
+    if (!s.pd[w][p]) s.pd[w][p] = {P:false, D:false};
+    s.pd[w][p][type] = !allTicked;
+  });
+  renderPD();
   autoSyncRecords();
 }
 
@@ -924,6 +948,16 @@ function renderManuring() {
 
   h+='</thead><tbody>';
 
+  // Select-all row
+  h+='<tr class="select-all-tr"><td style="text-align:right;font-size:10px;color:#666;font-weight:600;padding-right:8px;letter-spacing:.3px">Select All →</td>';
+  cfg.forEach((round, ri) => {
+    round.forEach((_, ci) => {
+      const all = plots.every(p => s.manuring[p]?.[ri]?.[ci]);
+      h+=`<td class="check-td${all?' ticked':''}" style="background:#eef6ff" onclick="toggleAllManuring(${ri},${ci})" title="Select all for Round ${ri+1} col ${ci+1}">${all?'☑':'☐'}</td>`;
+    });
+  });
+  h+='</tr>';
+
   // Plot rows
   plots.forEach(plot => {
     h+=`<tr><td class="plot-td">${plot}</td>`;
@@ -988,6 +1022,20 @@ function togManuring(n,m,plot,ri,ci,el){
   autoSyncRecords();
 }
 
+function toggleAllManuring(ri, ci){
+  if(!canEditSchedule) return;
+  const n=getNursery(), m=getMonth(), s=getState(n,m);
+  const plots=NURSERY_PLOTS[n];
+  const allTicked = plots.every(p => s.manuring[p]?.[ri]?.[ci]);
+  plots.forEach(p => {
+    if (!s.manuring[p]) s.manuring[p] = [];
+    if (!s.manuring[p][ri]) s.manuring[p][ri] = [];
+    s.manuring[p][ri][ci] = !allTicked;
+  });
+  renderManuring();
+  autoSyncRecords();
+}
+
 /* ════════════════════════════
    WEEDING TABLE  (Round 1 & Round 2 only)
 ════════════════════════════ */
@@ -1000,6 +1048,15 @@ function renderWeeding() {
   h+='</tr><tr>';
   rounds.forEach(r=>h+=`<th class="p-th" style="min-width:130px;">Round ${r[1]}</th>`);
   h+='</tr></thead><tbody>';
+
+  // Select-all row
+  h+='<tr class="select-all-tr"><td style="text-align:right;font-size:10px;color:#666;font-weight:600;padding-right:8px;letter-spacing:.3px">Select All →</td>';
+  rounds.forEach(r=>{
+    const all = plots.every(p => s.weeding[p]?.[r]);
+    h+=`<td class="check-td${all?' ticked':''}" style="background:#eef6ff" onclick="toggleAllWeeding('${r}')">${all?'☑':'☐'}</td>`;
+  });
+  h+='</tr>';
+
   plots.forEach(plot=>{
     h+=`<tr><td class="plot-td">${plot}</td>`;
     rounds.forEach(r=>{
@@ -1020,6 +1077,18 @@ function togWeeding(n,m,plot,r,el){
   s.weeding[plot][r]=!s.weeding[plot][r];
   el.textContent=s.weeding[plot][r]?'☑':'☐';
   el.classList.toggle('ticked',s.weeding[plot][r]);
+  renderWeeding();
+  autoSyncRecords();
+}
+function toggleAllWeeding(r){
+  if(!canEditSchedule) return;
+  const n=getNursery(), m=getMonth(), s=getState(n,m);
+  const plots=NURSERY_PLOTS[n];
+  const all = plots.every(p => s.weeding[p]?.[r]);
+  plots.forEach(p => {
+    if (!s.weeding[p]) s.weeding[p] = {R1:false, R2:false};
+    s.weeding[p][r] = !all;
+  });
   renderWeeding();
   autoSyncRecords();
 }
@@ -1065,6 +1134,15 @@ function renderInterrow() {
     </th>`;
   });
   h+='</tr></thead><tbody>';
+
+  // Select-all row
+  h+='<tr class="select-all-tr"><td style="text-align:right;font-size:10px;color:#666;font-weight:600;padding-right:8px;letter-spacing:.3px">Select All →</td>';
+  rounds.forEach(r=>{
+    const all = plots.every(p => s.interrow[p]?.[r]);
+    h+=`<td class="check-td${all?' ticked':''}" style="background:#eef6ff" onclick="toggleAllInterrow('${r}')">${all?'☑':'☐'}</td>`;
+  });
+  h+='</tr>';
+
   plots.forEach(plot=>{
     h+=`<tr><td class="plot-td">${plot}</td>`;
     rounds.forEach(r=>{
@@ -1085,8 +1163,8 @@ function renderInterrow() {
   });
   h+='</tr>';
 
-  // Maksimal Racun Guna — 1 decimal (same formula as P&D)
-  h+='<tr class="jumlah-tr"><td>Maksimal Racun Guna</td>';
+  // Max Racun Guna — 1 decimal (same formula as P&D)
+  h+='<tr class="jumlah-tr"><td>Max Racun Guna</td>';
   rounds.forEach(r=>{
     const c = cfg[r];
     const seed = sumSeedlings(n, plots, p => s.interrow[p]?.[r]);
@@ -1094,8 +1172,8 @@ function renderInterrow() {
   });
   h+='</tr>';
 
-  // Maksimal Activator Guna — 1 decimal
-  h+='<tr class="jumlah-tr"><td>Maksimal Activator Guna</td>';
+  // Max Activator Guna — 1 decimal
+  h+='<tr class="jumlah-tr"><td>Max Activator Guna</td>';
   rounds.forEach(r=>{
     const c = cfg[r];
     const seed = sumSeedlings(n, plots, p => s.interrow[p]?.[r]);
@@ -1112,6 +1190,18 @@ function togInterrow(n,m,plot,r,el){
   s.interrow[plot][r]=!s.interrow[plot][r];
   el.textContent=s.interrow[plot][r]?'☑':'☐';
   el.classList.toggle('ticked',s.interrow[plot][r]);
+  renderInterrow();
+  autoSyncRecords();
+}
+function toggleAllInterrow(r){
+  if(!canEditSchedule) return;
+  const n=getNursery(), m=getMonth(), s=getState(n,m);
+  const plots=NURSERY_PLOTS[n];
+  const all = plots.every(p => s.interrow[p]?.[r]);
+  plots.forEach(p => {
+    if (!s.interrow[p]) s.interrow[p] = {R1:false, R2:false};
+    s.interrow[p][r] = !all;
+  });
   renderInterrow();
   autoSyncRecords();
 }
@@ -1355,7 +1445,7 @@ function closePdfModal(){ document.getElementById('pdf-modal').classList.remove(
 
 function downloadPDF() {
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
+  const doc = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
   const pN = document.getElementById('pdf-nursery').value;
   const pM = document.getElementById('pdf-month').value;
   const s  = getState(pN, pM);
@@ -1366,8 +1456,29 @@ function downloadPDF() {
   const incWeeding  = document.getElementById('pdf-inc-weeding').checked;
   const incInterrow = document.getElementById('pdf-inc-interrow').checked;
 
-  const PW=297, PH=210;
+  const PW=210, PH=297;
   let firstPage=true;
+
+  // Responsively size rows and columns so the whole table fits one page per section
+  function computeFit(bodyColCount, headerRows, summaryRows, maxColW) {
+    const titleEndY = 34;
+    const bottomMargin = 10;
+    const sideMargin = 8;
+    const availableH = PH - titleEndY - bottomMargin;
+    const availableW = PW - sideMargin * 2;
+    const totalRows = headerRows + plots.length + summaryRows;
+    let rowH = availableH / totalRows;
+    rowH = Math.min(7.5, Math.max(3.4, rowH));
+    const plotColW = Math.max(16, Math.min(24, availableW * 0.13));
+    let colW = (availableW - plotColW) / bodyColCount;
+    colW = Math.min(maxColW, colW);
+    const tableW = plotColW + colW * bodyColCount;
+    const startX = (PW - tableW) / 2;
+    // Font scale based on row height
+    const fontMul = rowH < 4 ? 0.7 : rowH < 5 ? 0.82 : 1;
+    const fs = (size) => Math.max(5, size * fontMul);
+    return { rowH, plotColW, colW, startX, fs };
+  }
 
   function addPage(title, badge) {
     if(!firstPage) doc.addPage();
@@ -1409,6 +1520,8 @@ function downloadPDF() {
     doc.setLineWidth(0.2);
   }
 
+  // Section-level font scale (set by computeFit) — used by cell()
+  let _fontMul = 1;
   // Shared cell drawer
   function cell(x, y, w, h, text, opts) {
     const o = Object.assign({
@@ -1421,15 +1534,12 @@ function downloadPDF() {
     if (text != null && text !== '') {
       doc.setTextColor(o.textColor[0], o.textColor[1], o.textColor[2]);
       doc.setFont(o.font, o.style);
-      doc.setFontSize(o.size);
+      doc.setFontSize(Math.max(5, o.size * _fontMul));
       doc.text(String(text), x + w/2, y + h*0.7, { align:o.align, maxWidth: w-1.2 });
     }
   }
 
-  const PAGE_MARGIN = 12;
-  const plotColW = 30;
-  const rowH = 7;
-  // computed per-section table width centered horizontally
+  const PAGE_MARGIN = 8;
   function centeredX(tableW){ return (PW - tableW) / 2; }
   const PALETTE = {
     headerDark:  {fill:[8,92,51],   textColor:[255,255,255]},
@@ -1462,9 +1572,10 @@ function downloadPDF() {
     addPage('JADUAL PENYEMBURAN RACUN KULAT DAN SERANGGA','P&D RACUN');
     const cfg = s.pdConfig;
     const W = ['W1','W2','W3','W4'];
-    const colW = Math.min(32, (PW - PAGE_MARGIN*2 - plotColW) / 8);
-    const tableW = plotColW + colW*8;
-    const startX = centeredX(tableW);
+    // 4 header rows (MINGGU, P/D, chem, sticker), 4 summary rows
+    const fit = computeFit(8, 4, 4, 22);
+    const { rowH, plotColW, colW, startX } = fit;
+    _fontMul = (rowH < 4 ? 0.7 : rowH < 5 ? 0.82 : 1);
     let y = 34;
 
     // Row 1: PLOT header spanning 4 sub-rows + MINGGU titles
@@ -1572,9 +1683,10 @@ function downloadPDF() {
     addPage('JADUAL MANURING','MANURING');
     const cfg = s.manuringConfig;
     const totalCols = cfg.reduce((sum, r) => sum + r.length, 0);
-    const colW = Math.min(55, (PW - PAGE_MARGIN*2 - plotColW) / totalCols);
-    const tableW = plotColW + colW*totalCols;
-    const startX = centeredX(tableW);
+    // 3 header rows (Round, fert name, dose), 4 summary rows
+    const fit = computeFit(totalCols, 3, 4, 50);
+    const { rowH, plotColW, colW, startX } = fit;
+    _fontMul = (rowH < 4 ? 0.7 : rowH < 5 ? 0.82 : 1);
     let y = 34;
 
     // Row 1: PLOT (rowspan=4) + Round headers
@@ -1673,9 +1785,10 @@ function downloadPDF() {
   if(incWeeding) {
     addPage('JADUAL WEEDING','WEEDING');
     const rounds = ['R1','R2'];
-    const colW = Math.min(80, (PW - PAGE_MARGIN*2 - plotColW) / rounds.length);
-    const tableW = plotColW + colW*rounds.length;
-    const startX = centeredX(tableW);
+    // 2 header rows (ROUND, label), 1 summary row
+    const fit = computeFit(rounds.length, 2, 1, 80);
+    const { rowH, plotColW, colW, startX } = fit;
+    _fontMul = (rowH < 4 ? 0.7 : rowH < 5 ? 0.82 : 1);
     let y = 34;
 
     cell(startX, y, plotColW, rowH*2, 'PLOT', {...PALETTE.headerDark, style:'bold', size:8});
@@ -1714,9 +1827,10 @@ function downloadPDF() {
     addPage('JADUAL INTERROW SPRAY','INTERROW SPRAY');
     const icfg = s.interrowConfig;
     const rounds = ['R1','R2'];
-    const colW = Math.min(80, (PW - PAGE_MARGIN*2 - plotColW) / rounds.length);
-    const tableW = plotColW + colW*rounds.length;
-    const startX = centeredX(tableW);
+    // 3 header rows (ROUND, chem+dose, activator), 4 summary rows
+    const fit = computeFit(rounds.length, 3, 4, 80);
+    const { rowH, plotColW, colW, startX } = fit;
+    _fontMul = (rowH < 4 ? 0.7 : rowH < 5 ? 0.82 : 1);
     let y = 34;
 
     cell(startX, y, plotColW, rowH*3, 'PLOT', {...PALETTE.headerDark, style:'bold', size:8});
