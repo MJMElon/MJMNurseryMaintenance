@@ -72,6 +72,20 @@ function fmtUsage(totalAmount, unit){
   const rounded = Math.round(big * 100) / 100;
   return rounded + (unit === 'gm' ? ' kg' : ' L');
 }
+/* Unit per chemical — used to auto-set mL/gm when a chemical is selected */
+const CHEMICAL_UNITS = {
+  // Pest
+  'Cyper':'mL','Destroy':'mL','Becker':'mL','Asir':'gm',
+  // Disease
+  'Antracol':'gm','Dithane':'gm','Thiram':'gm','Daconil':'gm','Manzate':'gm',
+  // Weedicide / sticker
+  'Widex':'gm','Sentry':'mL','Ally':'gm','Basta':'mL','Monex':'mL','Acosta':'mL',
+  'Bond':'mL','Activator':'mL',
+  // Fertilizer
+  'Sk Cote':'gm','Yaramila':'gm','Compound 55':'gm','Ajimino':'gm','ERP':'gm','Organic Matter':'gm',
+};
+function getUnitForChem(name){ return CHEMICAL_UNITS[name] || 'gm'; }
+
 function calcMaxChem(seedlings, chemName, dose, unit){
   if(!seedlings || !chemName || chemName === '—' || !dose) return '—';
   // Formula: (plot capacity / coverage per pump) × dose per pump / 1000
@@ -107,7 +121,7 @@ function calcFertUsage(seedlings, fertName, doseGm){
   const bagsStr = info ? (Math.round((totalGm / info.bagSizeGm) * 100) / 100) + ' bags (' + info.bagLabel + ' each)' : '—';
   return { kg: kgStr, bags: bagsStr, totalGm };
 }
-const INTERROW_CHEM_OPTIONS = ['Basta','Monex'];
+const INTERROW_CHEM_OPTIONS = ['Basta','Monex','Acosta'];
 
 /* Categorized chemical catalog with default dose per chemical — used by Chemical Calculator */
 const CHEMICAL_CATEGORIES = [
@@ -132,8 +146,9 @@ const CHEMICAL_CATEGORIES = [
     { name:'Ally',   dose:3,   unit:'gm' },
   ]},
   { group: 'Weedicide : Contact + Systemic', chems: [
-    { name:'Basta', dose:200, unit:'mL' },
-    { name:'Monex', dose:200, unit:'mL' },
+    { name:'Basta',  dose:200, unit:'mL' },
+    { name:'Monex',  dose:200, unit:'mL' },
+    { name:'Acosta', dose:200, unit:'mL' },
   ]},
   { group: 'Sticker for fungicide', chems: [
     { name:'Bond', dose:15, unit:'mL' },
@@ -167,11 +182,27 @@ function defaultPDConfig() {
   };
 }
 function defaultManuringConfig() {
+  // Nested: array of rounds → each round is an array of fertilizer columns
   return [
-    { name:'Yaramila',       dose:20,  unit:'gm' },
-    { name:'Compound 55',    dose:20,  unit:'gm' },
-    { name:'Organic Matter', dose:180, unit:'gm' },
+    [
+      { name:'Yaramila',       dose:20,  unit:'gm' },
+      { name:'Compound 55',    dose:20,  unit:'gm' },
+      { name:'Organic Matter', dose:180, unit:'gm' },
+    ],
   ];
+}
+/* Migrate old flat manuringConfig (and manuring ticks) to the new nested rounds shape */
+function migrateManuringShape(s, plots) {
+  if (!s || !s.manuringConfig || s.manuringConfig.length === 0) return;
+  if (!Array.isArray(s.manuringConfig[0])) {
+    s.manuringConfig = [s.manuringConfig];
+    plots.forEach(p => {
+      const v = s.manuring?.[p];
+      if (Array.isArray(v) && (v.length === 0 || typeof v[0] === 'boolean')) {
+        s.manuring[p] = [v];
+      }
+    });
+  }
 }
 function defaultInterrowConfig() {
   return {
@@ -219,6 +250,7 @@ function getState(nursery, month) {
     // Hydrate from localStorage if a saved state exists for this nursery+month
     const persisted = loadPersistedState(nursery, month);
     if (persisted) {
+      migrateManuringShape(persisted, NURSERY_PLOTS[nursery]);
       appState[nursery][month] = persisted;
       return appState[nursery][month];
     }
@@ -238,7 +270,7 @@ function getState(nursery, month) {
       plots.forEach(p => { s.pd[w][p] = { P:false, D:false }; });
     });
     plots.forEach(p => {
-      s.manuring[p]  = [false, false, false];
+      s.manuring[p]  = [[false, false, false]]; // [round1: [col1, col2, col3]]
       s.weeding[p]   = { R1:false, R2:false };
       s.interrow[p]  = { R1:false, R2:false };
     });
@@ -254,7 +286,7 @@ function getState(nursery, month) {
         plots.forEach(p => { s.pd[w][p] = { P:v.P.includes(p), D:v.D.includes(p) }; });
       });
       const mSeed = { 0:['B11','B13','B14'], 1:['B1','B3','B6','B11'], 2:['B2','B4','B7','B8','B9'] };
-      plots.forEach(p => { s.manuring[p] = [mSeed[0].includes(p), mSeed[1].includes(p), mSeed[2].includes(p)]; });
+      plots.forEach(p => { s.manuring[p] = [[mSeed[0].includes(p), mSeed[1].includes(p), mSeed[2].includes(p)]]; });
     }
     appState[nursery][month] = s;
   }
@@ -392,11 +424,13 @@ function autoSyncRecords() {
       }
     });
   });
-  s.manuringConfig.forEach((c,i)=>{
-    plots.filter(p=>s.manuring[p]?.[i]).forEach(plot=>{
-      newRecs.push({id:id++, tarikh:'-', jenis:'Membaja',
-        racun:`Round ${i+1}: ${c.name} ${c.dose}${c.unit}`,
-        plot, batch:'', carlos:0, gaia:0, remark:''});
+  s.manuringConfig.forEach((round, ri) => {
+    round.forEach((c, ci) => {
+      plots.filter(p=>s.manuring[p]?.[ri]?.[ci]).forEach(plot => {
+        newRecs.push({id:id++, tarikh:'-', jenis:'Membaja',
+          racun:`Round ${ri+1}: ${c.name} ${c.dose}${c.unit}`,
+          plot, batch:'', carlos:0, gaia:0, remark:''});
+      });
     });
   });
   ['R1','R2'].forEach(r=>{
@@ -660,7 +694,17 @@ function mkDose(val, unit, onch) {
 /* ════════════════════════════
    P&D TABLE
 ════════════════════════════ */
-function updatePDChem(w,f,v){ if(!canEditSchedule) return; getState(getNursery(),getMonth()).pdConfig[w][f]=v; renderPD(); }
+function updatePDChem(w,f,v){
+  if(!canEditSchedule) return;
+  const cfg = getState(getNursery(),getMonth()).pdConfig[w];
+  cfg[f] = v;
+  // Auto-set unit based on the selected chemical
+  if (f === 'P')         cfg.P_unit         = getUnitForChem(v);
+  else if (f === 'D')    cfg.D_unit         = getUnitForChem(v);
+  else if (f === 'P_sticker') cfg.P_sticker_unit = getUnitForChem(v);
+  else if (f === 'D_sticker') cfg.D_sticker_unit = getUnitForChem(v);
+  renderPD();
+}
 function updatePDDose(w,f,v){ if(!canEditSchedule) return; getState(getNursery(),getMonth()).pdConfig[w][f]=v; renderPD(); }
 
 function renderPD() {
@@ -760,86 +804,172 @@ function snapshotPdSaved(s){
 /* ════════════════════════════
    MANURING TABLE
 ════════════════════════════ */
-function updateManuringChem(i,v){ if(!canEditSchedule) return; getState(getNursery(),getMonth()).manuringConfig[i].name=v; renderManuring(); }
-function updateManuringDose(i,v){ if(!canEditSchedule) return; getState(getNursery(),getMonth()).manuringConfig[i].dose=v; renderManuring(); }
-function addManuringCol(){
+function updateManuringChem(ri, ci, v){
   if(!canEditSchedule) return;
-  const s=getState(getNursery(),getMonth());
-  if(s.manuringConfig.length>=6) return;
-  s.manuringConfig.push({name:'Yaramila',dose:20,unit:'gm'});
-  NURSERY_PLOTS[getNursery()].forEach(p=>{ if(!s.manuring[p]) s.manuring[p]=[]; s.manuring[p].push(false); });
+  const cfg = getState(getNursery(),getMonth()).manuringConfig[ri][ci];
+  cfg.name = v;
+  cfg.unit = getUnitForChem(v);
   renderManuring();
 }
-function removeManuringCol(){
+function updateManuringDose(ri, ci, v){
   if(!canEditSchedule) return;
-  const s=getState(getNursery(),getMonth());
-  if(s.manuringConfig.length<=1) return;
+  getState(getNursery(),getMonth()).manuringConfig[ri][ci].dose = v;
+  renderManuring();
+}
+function addManuringRound(){
+  if(!canEditSchedule) return;
+  const s = getState(getNursery(),getMonth());
+  if (s.manuringConfig.length >= 6) return;
+  s.manuringConfig.push([{name:'Yaramila', dose:20, unit:'gm'}]);
+  NURSERY_PLOTS[getNursery()].forEach(p => {
+    if (!s.manuring[p]) s.manuring[p] = [];
+    s.manuring[p].push([false]);
+  });
+  renderManuring();
+}
+function removeManuringRound(){
+  if(!canEditSchedule) return;
+  const s = getState(getNursery(),getMonth());
+  if (s.manuringConfig.length <= 1) return;
   s.manuringConfig.pop();
-  NURSERY_PLOTS[getNursery()].forEach(p=>{ if(s.manuring[p]) s.manuring[p].pop(); });
+  NURSERY_PLOTS[getNursery()].forEach(p => {
+    if (s.manuring[p]) s.manuring[p].pop();
+  });
+  renderManuring();
+}
+function addManuringCol(ri){
+  if(!canEditSchedule) return;
+  const s = getState(getNursery(),getMonth());
+  if (!s.manuringConfig[ri] || s.manuringConfig[ri].length >= 6) return;
+  s.manuringConfig[ri].push({name:'Yaramila', dose:20, unit:'gm'});
+  NURSERY_PLOTS[getNursery()].forEach(p => {
+    if (!s.manuring[p]) s.manuring[p] = [];
+    if (!s.manuring[p][ri]) s.manuring[p][ri] = [];
+    s.manuring[p][ri].push(false);
+  });
+  renderManuring();
+}
+function removeManuringCol(ri){
+  if(!canEditSchedule) return;
+  const s = getState(getNursery(),getMonth());
+  if (!s.manuringConfig[ri] || s.manuringConfig[ri].length <= 1) return;
+  s.manuringConfig[ri].pop();
+  NURSERY_PLOTS[getNursery()].forEach(p => {
+    if (s.manuring[p]?.[ri]) s.manuring[p][ri].pop();
+  });
   renderManuring();
 }
 
 function renderManuring() {
   const n=getNursery(), m=getMonth(), s=getState(n,m), cfg=s.manuringConfig, plots=NURSERY_PLOTS[n];
-  let h='<thead><tr>';
-  h+=`<th rowspan="3" class="plot-col-hdr">PLOT</th>`;
-  h+=`<th colspan="${cfg.length}" class="wk-th" style="position:relative;">
-    ROUND 1
+  const totalCols = cfg.reduce((sum, r) => sum + r.length, 0);
+  let h='<thead>';
+
+  // Row 1: PLOT (rowspan=5) + master header with + Round / − Round
+  h+='<tr>';
+  h+=`<th rowspan="5" class="plot-col-hdr">PLOT</th>`;
+  h+=`<th colspan="${totalCols}" class="wk-th" style="position:relative;">
+    MANURING ROUNDS
     <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);display:flex;gap:6px;">
-      <button class="th-action-btn" onclick="addManuringCol()">+ Col</button>
-      ${cfg.length>1?`<button class="th-action-btn th-action-danger" onclick="removeManuringCol()">− Col</button>`:''}
+      <button class="th-action-btn" onclick="addManuringRound()">+ Round</button>
+      ${cfg.length>1?`<button class="th-action-btn th-action-danger" onclick="removeManuringRound()">− Round</button>`:''}
     </span>
-  </th></tr><tr>`;
-  cfg.forEach((c,i)=>h+=`<th class="hdr-input-cell f-bg">${mkSel(FERT_OPTIONS,c.name,`updateManuringChem(${i},this.value)`)}</th>`);
-  h+='</tr><tr>';
-  cfg.forEach((c,i)=>h+=`<th class="hdr-input-cell f-bg-light">${mkDose(c.dose,c.unit,`updateManuringDose(${i},+this.value)`)}</th>`);
-  h+='</tr></thead><tbody>';
-  plots.forEach(plot=>{
+  </th>`;
+  h+='</tr>';
+
+  // Row 2: Per-round headers with + Col / − Col
+  h+='<tr>';
+  cfg.forEach((round, ri) => {
+    h+=`<th colspan="${round.length}" class="wk-th" style="position:relative;background:#0d7a47;">
+      Round ${ri+1}
+      <span style="position:absolute;right:6px;top:50%;transform:translateY(-50%);display:flex;gap:4px;">
+        <button class="th-action-btn" onclick="addManuringCol(${ri})">+ Col</button>
+        ${round.length>1?`<button class="th-action-btn th-action-danger" onclick="removeManuringCol(${ri})">− Col</button>`:''}
+      </span>
+    </th>`;
+  });
+  h+='</tr>';
+
+  // Row 3: Fertilizer name dropdowns
+  h+='<tr>';
+  cfg.forEach((round, ri) => {
+    round.forEach((c, ci) => {
+      h+=`<th class="hdr-input-cell f-bg">${mkSel(FERT_OPTIONS,c.name,`updateManuringChem(${ri},${ci},this.value)`)}</th>`;
+    });
+  });
+  h+='</tr>';
+
+  // Row 4: Dose inputs
+  h+='<tr>';
+  cfg.forEach((round, ri) => {
+    round.forEach((c, ci) => {
+      h+=`<th class="hdr-input-cell f-bg-light">${mkDose(c.dose,c.unit,`updateManuringDose(${ri},${ci},+this.value)`)}</th>`;
+    });
+  });
+  h+='</tr>';
+
+  h+='</thead><tbody>';
+
+  // Plot rows
+  plots.forEach(plot => {
     h+=`<tr><td class="plot-td">${plot}</td>`;
-    cfg.forEach((_,i)=>{
-      const v=s.manuring[plot]?.[i]||false;
-      h+=`<td class="check-td${v?' ticked':''}" onclick="togManuring('${n}','${m}','${plot}',${i},this)">${v?'☑':'☐'}</td>`;
+    cfg.forEach((round, ri) => {
+      round.forEach((_, ci) => {
+        const v = s.manuring[plot]?.[ri]?.[ci] || false;
+        h+=`<td class="check-td${v?' ticked':''}" onclick="togManuring('${n}','${m}','${plot}',${ri},${ci},this)">${v?'☑':'☐'}</td>`;
+      });
     });
     h+='</tr>';
   });
+
+  // Jumlah Plot
   h+='<tr class="jumlah-tr"><td>Jumlah Plot</td>';
-  cfg.forEach((_,i)=>h+=`<td>${plots.filter(p=>s.manuring[p]?.[i]).length}</td>`);
+  cfg.forEach((round, ri) => {
+    round.forEach((_, ci) => {
+      h+=`<td>${plots.filter(p=>s.manuring[p]?.[ri]?.[ci]).length}</td>`;
+    });
+  });
   h+='</tr>';
 
-  // Jumlah Bibit (total seedlings per round)
+  // Jumlah Bibit
   h+='<tr class="jumlah-tr"><td>Jumlah Bibit</td>';
-  cfg.forEach((_,i)=>{
-    const seed = sumSeedlings(n, plots, p => s.manuring[p]?.[i]);
-    h+=`<td>${seed ? seed.toLocaleString() : '—'}</td>`;
+  cfg.forEach((round, ri) => {
+    round.forEach((_, ci) => {
+      const seed = sumSeedlings(n, plots, p => s.manuring[p]?.[ri]?.[ci]);
+      h+=`<td>${seed ? seed.toLocaleString() : '—'}</td>`;
+    });
   });
   h+='</tr>';
 
-  // Maksimal Baja Guna (max fertilizer usage per round, in kg)
+  // Maksimal Baja Guna
   h+='<tr class="jumlah-tr"><td>Maksimal Baja Guna</td>';
-  cfg.forEach((c,i)=>{
-    const seed = sumSeedlings(n, plots, p => s.manuring[p]?.[i]);
-    const usage = calcFertUsage(seed, c.name, c.dose);
-    h+=`<td>${usage.kg}</td>`;
+  cfg.forEach((round, ri) => {
+    round.forEach((c, ci) => {
+      const seed = sumSeedlings(n, plots, p => s.manuring[p]?.[ri]?.[ci]);
+      const usage = calcFertUsage(seed, c.name, c.dose);
+      h+=`<td>${usage.kg}</td>`;
+    });
   });
   h+='</tr>';
 
-  // Bags Needed (per round)
+  // Bags Needed
   h+='<tr class="jumlah-tr"><td>Bags Needed</td>';
-  cfg.forEach((c,i)=>{
-    const seed = sumSeedlings(n, plots, p => s.manuring[p]?.[i]);
-    const usage = calcFertUsage(seed, c.name, c.dose);
-    h+=`<td style="font-size:10px">${usage.bags}</td>`;
+  cfg.forEach((round, ri) => {
+    round.forEach((c, ci) => {
+      const seed = sumSeedlings(n, plots, p => s.manuring[p]?.[ri]?.[ci]);
+      const usage = calcFertUsage(seed, c.name, c.dose);
+      h+=`<td style="font-size:10px">${usage.bags}</td>`;
+    });
   });
   h+='</tr></tbody>';
   document.getElementById('manuring-table').innerHTML=h;
 }
-function togManuring(n,m,plot,idx,el){
+function togManuring(n,m,plot,ri,ci,el){
   if(!canEditSchedule) return;
   const s=getState(n,m);
   if(!s.manuring[plot]) s.manuring[plot]=[];
-  s.manuring[plot][idx]=!s.manuring[plot][idx];
-  el.textContent=s.manuring[plot][idx]?'☑':'☐';
-  el.classList.toggle('ticked',s.manuring[plot][idx]);
+  if(!s.manuring[plot][ri]) s.manuring[plot][ri]=[];
+  s.manuring[plot][ri][ci] = !s.manuring[plot][ri][ci];
   renderManuring();
   autoSyncRecords();
 }
@@ -883,7 +1013,13 @@ function togWeeding(n,m,plot,r,el){
 /* ════════════════════════════
    INTERROW SPRAY TABLE
 ════════════════════════════ */
-function updateInterrowChem(r,v){ if(!canEditSchedule) return; getState(getNursery(),getMonth()).interrowConfig[r].chem=v; renderInterrow(); }
+function updateInterrowChem(r,v){
+  if(!canEditSchedule) return;
+  const cfg = getState(getNursery(),getMonth()).interrowConfig[r];
+  cfg.chem = v;
+  cfg.chem_unit = getUnitForChem(v);
+  renderInterrow();
+}
 function updateInterrowDose(r,f,v){ if(!canEditSchedule) return; getState(getNursery(),getMonth()).interrowConfig[r][f]=v; renderInterrow(); }
 
 function renderInterrow() {
@@ -969,12 +1105,14 @@ function saveSchedule() {
       }
     });
   });
-  s.manuringConfig.forEach((c, i) => {
-    plots.filter(p => s.manuring[p]?.[i]).forEach(plot => {
-      tasks.push({ id:id++, type:'manuring', plot, round:`Round ${i+1}`,
-        jenis:'Membaja',
-        chemical:`${c.name} ${c.dose}${c.unit}`,
-        detail:`Manuring Round ${i+1}` });
+  s.manuringConfig.forEach((round, ri) => {
+    round.forEach((c, ci) => {
+      plots.filter(p => s.manuring[p]?.[ri]?.[ci]).forEach(plot => {
+        tasks.push({ id:id++, type:'manuring', plot, round:`Round ${ri+1}`,
+          jenis:'Membaja',
+          chemical:`${c.name} ${c.dose}${c.unit}`,
+          detail:`Manuring Round ${ri+1}` });
+      });
     });
   });
   ['R1','R2'].forEach(r => {
@@ -1392,78 +1530,101 @@ function downloadPDF() {
   if(incManuring) {
     addPage('JADUAL MANURING','MANURING');
     const cfg = s.manuringConfig;
-    const nCols = cfg.length;
-    const colW = Math.min(55, (PW - PAGE_MARGIN*2 - plotColW) / nCols);
-    const tableW = plotColW + colW*nCols;
+    const totalCols = cfg.reduce((sum, r) => sum + r.length, 0);
+    const colW = Math.min(55, (PW - PAGE_MARGIN*2 - plotColW) / totalCols);
+    const tableW = plotColW + colW*totalCols;
     const startX = centeredX(tableW);
     let y = 34;
 
-    // Header rows: 4 sub-rows for plot label
-    cell(startX, y, plotColW, rowH*3, 'PLOT', {...PALETTE.headerDark, style:'bold', size:8});
-    cfg.forEach((c, i) => {
-      const x = startX + plotColW + i*colW;
-      cell(x, y, colW, rowH, `Round ${i+1}`, {...PALETTE.headerDark, style:'bold', size:8});
+    // Row 1: PLOT (rowspan=4) + Round headers
+    cell(startX, y, plotColW, rowH*4, 'PLOT', {...PALETTE.headerDark, style:'bold', size:8});
+    let xCursor = startX + plotColW;
+    cfg.forEach((round, ri) => {
+      const w = colW * round.length;
+      cell(xCursor, y, w, rowH, `Round ${ri+1}`, {...PALETTE.headerDark, style:'bold', size:8});
+      xCursor += w;
     });
     y += rowH;
 
-    // Fertilizer name
-    cfg.forEach((c, i) => {
-      const x = startX + plotColW + i*colW;
-      cell(x, y, colW, rowH, c.name, {...PALETTE.fert, style:'bold', size:7});
+    // Row 2: fertilizer name per column
+    xCursor = startX + plotColW;
+    cfg.forEach(round => {
+      round.forEach(c => {
+        cell(xCursor, y, colW, rowH, c.name, {...PALETTE.fert, style:'bold', size:7});
+        xCursor += colW;
+      });
     });
     y += rowH;
 
-    // Dose
-    cfg.forEach((c, i) => {
-      const x = startX + plotColW + i*colW;
-      cell(x, y, colW, rowH, `${c.dose}${c.unit}`, {...PALETTE.fert, size:7});
+    // Row 3: dose per column
+    xCursor = startX + plotColW;
+    cfg.forEach(round => {
+      round.forEach(c => {
+        cell(xCursor, y, colW, rowH, `${c.dose}${c.unit}`, {...PALETTE.fert, size:7});
+        xCursor += colW;
+      });
     });
     y += rowH;
 
     // Plot rows
-    plots.forEach((plot, ri) => {
-      const bg = ri % 2 === 0 ? PALETTE.altRow : PALETTE.plain;
+    plots.forEach((plot, ri_row) => {
+      const bg = ri_row % 2 === 0 ? PALETTE.altRow : PALETTE.plain;
       cell(startX, y, plotColW, rowH, plot, {...bg, style:'bold', size:8});
-      cfg.forEach((_, i) => {
-        const x = startX + plotColW + i*colW;
-        const v = s.manuring[plot]?.[i] || false;
-        cell(x, y, colW, rowH, '', bg);
-        if (v) drawCheck(x, y, colW, rowH);
+      xCursor = startX + plotColW;
+      cfg.forEach((round, ri) => {
+        round.forEach((_, ci) => {
+          const v = s.manuring[plot]?.[ri]?.[ci] || false;
+          cell(xCursor, y, colW, rowH, '', bg);
+          if (v) drawCheck(xCursor, y, colW, rowH);
+          xCursor += colW;
+        });
       });
       y += rowH;
     });
 
     // Summary rows
     cell(startX, y, plotColW, rowH, 'Jumlah Plot', {...PALETTE.summaryDark, style:'bold', size:8});
-    cfg.forEach((_, i) => {
-      const x = startX + plotColW + i*colW;
-      cell(x, y, colW, rowH, String(plots.filter(p=>s.manuring[p]?.[i]).length), {...PALETTE.summary, style:'bold', size:8});
+    xCursor = startX + plotColW;
+    cfg.forEach((round, ri) => {
+      round.forEach((_, ci) => {
+        cell(xCursor, y, colW, rowH, String(plots.filter(p=>s.manuring[p]?.[ri]?.[ci]).length), {...PALETTE.summary, style:'bold', size:8});
+        xCursor += colW;
+      });
     });
     y += rowH;
 
     cell(startX, y, plotColW, rowH, 'Jumlah Bibit', {...PALETTE.summaryDark, style:'bold', size:8});
-    cfg.forEach((_, i) => {
-      const x = startX + plotColW + i*colW;
-      const seed = sumSeedlings(pN, plots, p => s.manuring[p]?.[i]);
-      cell(x, y, colW, rowH, seed ? seed.toLocaleString() : '—', {...PALETTE.summary, size:8});
+    xCursor = startX + plotColW;
+    cfg.forEach((round, ri) => {
+      round.forEach((_, ci) => {
+        const seed = sumSeedlings(pN, plots, p => s.manuring[p]?.[ri]?.[ci]);
+        cell(xCursor, y, colW, rowH, seed ? seed.toLocaleString() : '—', {...PALETTE.summary, size:8});
+        xCursor += colW;
+      });
     });
     y += rowH;
 
     cell(startX, y, plotColW, rowH, 'Max Baja Guna', {...PALETTE.summaryDark, style:'bold', size:7.5});
-    cfg.forEach((c, i) => {
-      const x = startX + plotColW + i*colW;
-      const seed = sumSeedlings(pN, plots, p => s.manuring[p]?.[i]);
-      const u = calcFertUsage(seed, c.name, c.dose);
-      cell(x, y, colW, rowH, u.kg, {...PALETTE.summary, style:'bold', size:8});
+    xCursor = startX + plotColW;
+    cfg.forEach((round, ri) => {
+      round.forEach((c, ci) => {
+        const seed = sumSeedlings(pN, plots, p => s.manuring[p]?.[ri]?.[ci]);
+        const u = calcFertUsage(seed, c.name, c.dose);
+        cell(xCursor, y, colW, rowH, u.kg, {...PALETTE.summary, style:'bold', size:8});
+        xCursor += colW;
+      });
     });
     y += rowH;
 
     cell(startX, y, plotColW, rowH, 'Bags Needed', {...PALETTE.summaryDark, style:'bold', size:7.5});
-    cfg.forEach((c, i) => {
-      const x = startX + plotColW + i*colW;
-      const seed = sumSeedlings(pN, plots, p => s.manuring[p]?.[i]);
-      const u = calcFertUsage(seed, c.name, c.dose);
-      cell(x, y, colW, rowH, u.bags, {...PALETTE.summary, size:7});
+    xCursor = startX + plotColW;
+    cfg.forEach((round, ri) => {
+      round.forEach((c, ci) => {
+        const seed = sumSeedlings(pN, plots, p => s.manuring[p]?.[ri]?.[ci]);
+        const u = calcFertUsage(seed, c.name, c.dose);
+        cell(xCursor, y, colW, rowH, u.bags, {...PALETTE.summary, size:7});
+        xCursor += colW;
+      });
     });
   }
 
