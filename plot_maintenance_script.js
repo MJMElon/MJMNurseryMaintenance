@@ -66,10 +66,11 @@ const CHEMICAL_COVERAGE = { // overrides for chemicals with different cover-per-
   'Asir': 1, // per-seedling: capacity × dose / 1000
 };
 
-function fmtUsage(totalAmount, unit){
-  // gm → kg, mL → L; 2 decimals (no round-up)
+function fmtUsage(totalAmount, unit, decimals = 2){
+  // gm → kg, mL → L; default 2 decimals (no round-up)
   const big = totalAmount / 1000;
-  const rounded = Math.round(big * 100) / 100;
+  const factor = Math.pow(10, decimals);
+  const rounded = Math.round(big * factor) / factor;
   return rounded + (unit === 'gm' ? ' kg' : ' L');
 }
 /* Unit per chemical — used to auto-set mL/gm when a chemical is selected */
@@ -86,12 +87,12 @@ const CHEMICAL_UNITS = {
 };
 function getUnitForChem(name){ return CHEMICAL_UNITS[name] || 'gm'; }
 
-function calcMaxChem(seedlings, chemName, dose, unit){
+function calcMaxChem(seedlings, chemName, dose, unit, decimals = 2){
   if(!seedlings || !chemName || chemName === '—' || !dose) return '—';
   // Formula: (plot capacity / coverage per pump) × dose per pump / 1000
   const coverage = CHEMICAL_COVERAGE[chemName] || COVERAGE_PER_PUMP;
   const totalUnits = (seedlings / coverage) * dose;
-  return fmtUsage(totalUnits, unit);
+  return fmtUsage(totalUnits, unit, decimals);
 }
 function sumSeedlings(nursery, plots, ticked){
   return plots.filter(p => ticked(p)).reduce((s,p) => s + getPlotQty(nursery, p), 0);
@@ -112,13 +113,14 @@ const FERTILIZER_INFO = {
   'ERP':            { defaultDose:20, bagSizeGm:50000,   bagLabel:'50 kg' },
   'Organic Matter': { defaultDose:60, bagSizeGm:1000000, bagLabel:'1,000 kg' },
 };
-function calcFertUsage(seedlings, fertName, doseGm){
+function calcFertUsage(seedlings, fertName, doseGm, decimals = 2){
   if (!seedlings || !fertName || fertName === '—' || !doseGm) return { kg:'—', bags:'—', totalGm:0 };
   const info = FERTILIZER_INFO[fertName];
   const totalGm = seedlings * doseGm;
   const totalKg = totalGm / 1000;
-  const kgStr = (Math.round(totalKg * 100) / 100).toLocaleString() + ' kg';
-  const bagsStr = info ? (Math.round((totalGm / info.bagSizeGm) * 100) / 100) + ' bags (' + info.bagLabel + ' each)' : '—';
+  const factor = Math.pow(10, decimals);
+  const kgStr = (Math.round(totalKg * factor) / factor).toLocaleString() + ' kg';
+  const bagsStr = info ? (Math.round((totalGm / info.bagSizeGm) * factor) / factor) + ' bags (' + info.bagLabel + ' each)' : '—';
   return { kg: kgStr, bags: bagsStr, totalGm };
 }
 const INTERROW_CHEM_OPTIONS = ['Basta','Monex','Acosta'];
@@ -582,6 +584,13 @@ function renderCalcCapacity() {
 function onCalcCapacityChange(n, p, v) {
   setPlotQty(n, p, v);
   renderCalcResults();
+  renderFertCalcResults();
+  // Push the new capacity through to the schedule tables so their
+  // Jumlah Bibit / Max Racun / Max Baja calculations stay correct.
+  if (n === getNursery()) {
+    renderPD();
+    renderManuring();
+  }
 }
 
 function resetCalcCapacity() {
@@ -589,6 +598,9 @@ function resetCalcCapacity() {
   resetPlotQty(getNursery());
   renderCalcCapacity();
   renderCalcResults();
+  renderFertCalcResults();
+  renderPD();
+  renderManuring();
 }
 
 function renderCalc() {
@@ -757,27 +769,27 @@ function renderPD() {
   });
   h+='</tr>';
 
-  // Maksimal Racun Guna (max chemical usage)
+  // Maksimal Racun Guna (max chemical usage) — 1 decimal
   h+='<tr class="jumlah-tr"><td>Maksimal Racun Guna</td>';
   W.forEach(w=>{
     const c = cfg[w];
     const pSeed = sumSeedlings(n, plots, p => s.pd[w]?.[p]?.P);
     const dSeed = sumSeedlings(n, plots, p => s.pd[w]?.[p]?.D);
-    h+=`<td>${calcMaxChem(pSeed, c.P, c.P_dose, c.P_unit)}</td>`;
-    h+=`<td>${calcMaxChem(dSeed, c.D, c.D_dose, c.D_unit)}</td>`;
+    h+=`<td>${calcMaxChem(pSeed, c.P, c.P_dose, c.P_unit, 1)}</td>`;
+    h+=`<td>${calcMaxChem(dSeed, c.D, c.D_dose, c.D_unit, 1)}</td>`;
   });
   h+='</tr>';
 
-  // Maksimal Bond Guna (sticker — per column)
+  // Maksimal Bond Guna (sticker — per column) — 1 decimal
   h+='<tr class="jumlah-tr"><td>Maksimal Bond Guna</td>';
   W.forEach(w=>{
     const c = cfg[w];
     const pSeed = sumSeedlings(n, plots, p => s.pd[w]?.[p]?.P);
     const dSeed = sumSeedlings(n, plots, p => s.pd[w]?.[p]?.D);
     const pBond = (!pSeed || c.P === '—' || c.P_sticker === '—')
-      ? '—' : calcMaxChem(pSeed, c.P_sticker, c.P_sticker_dose, c.P_sticker_unit);
+      ? '—' : calcMaxChem(pSeed, c.P_sticker, c.P_sticker_dose, c.P_sticker_unit, 1);
     const dBond = (!dSeed || c.D === '—' || c.D_sticker === '—')
-      ? '—' : calcMaxChem(dSeed, c.D_sticker, c.D_sticker_dose, c.D_sticker_unit);
+      ? '—' : calcMaxChem(dSeed, c.D_sticker, c.D_sticker_dose, c.D_sticker_unit, 1);
     h+=`<td>${pBond}</td><td>${dBond}</td>`;
   });
   h+='</tr></tbody>';
@@ -941,23 +953,23 @@ function renderManuring() {
   });
   h+='</tr>';
 
-  // Maksimal Baja Guna
+  // Maksimal Baja Guna — 1 decimal
   h+='<tr class="jumlah-tr"><td>Maksimal Baja Guna</td>';
   cfg.forEach((round, ri) => {
     round.forEach((c, ci) => {
       const seed = sumSeedlings(n, plots, p => s.manuring[p]?.[ri]?.[ci]);
-      const usage = calcFertUsage(seed, c.name, c.dose);
+      const usage = calcFertUsage(seed, c.name, c.dose, 1);
       h+=`<td>${usage.kg}</td>`;
     });
   });
   h+='</tr>';
 
-  // Bags Needed
+  // Bags Needed — 1 decimal
   h+='<tr class="jumlah-tr"><td>Bags Needed</td>';
   cfg.forEach((round, ri) => {
     round.forEach((c, ci) => {
       const seed = sumSeedlings(n, plots, p => s.manuring[p]?.[ri]?.[ci]);
-      const usage = calcFertUsage(seed, c.name, c.dose);
+      const usage = calcFertUsage(seed, c.name, c.dose, 1);
       h+=`<td style="font-size:10px">${usage.bags}</td>`;
     });
   });
@@ -1500,27 +1512,27 @@ function downloadPDF() {
     });
     y += rowH;
 
-    // Maksimal Racun Guna
+    // Maksimal Racun Guna — 1 decimal
     cell(startX, y, plotColW, rowH, 'Max Racun Guna', {...PALETTE.summaryDark, style:'bold', size:7.5});
     W.forEach((w, wi) => {
       const c = cfg[w];
       const x = startX + plotColW + wi*colW*2;
       const pSeed = sumSeedlings(pN, plots, p => s.pd[w]?.[p]?.P);
       const dSeed = sumSeedlings(pN, plots, p => s.pd[w]?.[p]?.D);
-      cell(x, y, colW, rowH, calcMaxChem(pSeed, c.P, c.P_dose, c.P_unit), {...PALETTE.summary, style:'bold', size:8});
-      cell(x+colW, y, colW, rowH, calcMaxChem(dSeed, c.D, c.D_dose, c.D_unit), {...PALETTE.summary, style:'bold', size:8});
+      cell(x, y, colW, rowH, calcMaxChem(pSeed, c.P, c.P_dose, c.P_unit, 1), {...PALETTE.summary, style:'bold', size:8});
+      cell(x+colW, y, colW, rowH, calcMaxChem(dSeed, c.D, c.D_dose, c.D_unit, 1), {...PALETTE.summary, style:'bold', size:8});
     });
     y += rowH;
 
-    // Maksimal Bond Guna
+    // Maksimal Bond Guna — 1 decimal
     cell(startX, y, plotColW, rowH, 'Max Bond Guna', {...PALETTE.summaryDark, style:'bold', size:7.5});
     W.forEach((w, wi) => {
       const c = cfg[w];
       const x = startX + plotColW + wi*colW*2;
       const pSeed = sumSeedlings(pN, plots, p => s.pd[w]?.[p]?.P);
       const dSeed = sumSeedlings(pN, plots, p => s.pd[w]?.[p]?.D);
-      const pBond = (!pSeed || c.P === '—' || c.P_sticker === '—') ? '—' : calcMaxChem(pSeed, c.P_sticker, c.P_sticker_dose, c.P_sticker_unit);
-      const dBond = (!dSeed || c.D === '—' || c.D_sticker === '—') ? '—' : calcMaxChem(dSeed, c.D_sticker, c.D_sticker_dose, c.D_sticker_unit);
+      const pBond = (!pSeed || c.P === '—' || c.P_sticker === '—') ? '—' : calcMaxChem(pSeed, c.P_sticker, c.P_sticker_dose, c.P_sticker_unit, 1);
+      const dBond = (!dSeed || c.D === '—' || c.D_sticker === '—') ? '—' : calcMaxChem(dSeed, c.D_sticker, c.D_sticker_dose, c.D_sticker_unit, 1);
       cell(x, y, colW, rowH, pBond, {...PALETTE.summary, style:'bold', size:8});
       cell(x+colW, y, colW, rowH, dBond, {...PALETTE.summary, style:'bold', size:8});
     });
@@ -1609,7 +1621,7 @@ function downloadPDF() {
     cfg.forEach((round, ri) => {
       round.forEach((c, ci) => {
         const seed = sumSeedlings(pN, plots, p => s.manuring[p]?.[ri]?.[ci]);
-        const u = calcFertUsage(seed, c.name, c.dose);
+        const u = calcFertUsage(seed, c.name, c.dose, 1);
         cell(xCursor, y, colW, rowH, u.kg, {...PALETTE.summary, style:'bold', size:8});
         xCursor += colW;
       });
@@ -1621,7 +1633,7 @@ function downloadPDF() {
     cfg.forEach((round, ri) => {
       round.forEach((c, ci) => {
         const seed = sumSeedlings(pN, plots, p => s.manuring[p]?.[ri]?.[ci]);
-        const u = calcFertUsage(seed, c.name, c.dose);
+        const u = calcFertUsage(seed, c.name, c.dose, 1);
         cell(xCursor, y, colW, rowH, u.bags, {...PALETTE.summary, size:7});
         xCursor += colW;
       });
