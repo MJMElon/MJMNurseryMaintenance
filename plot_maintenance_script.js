@@ -590,6 +590,7 @@ function onCalcCapacityChange(n, p, v) {
   if (n === getNursery()) {
     renderPD();
     renderManuring();
+    renderInterrow();
   }
 }
 
@@ -601,6 +602,7 @@ function resetCalcCapacity() {
   renderFertCalcResults();
   renderPD();
   renderManuring();
+  renderInterrow();
 }
 
 function renderCalc() {
@@ -1073,6 +1075,33 @@ function renderInterrow() {
   });
   h+='<tr class="jumlah-tr"><td>Jumlah Plot</td>';
   rounds.forEach(r=>h+=`<td>${plots.filter(p=>s.interrow[p]?.[r]).length}</td>`);
+  h+='</tr>';
+
+  // Jumlah Bibit
+  h+='<tr class="jumlah-tr"><td>Jumlah Bibit</td>';
+  rounds.forEach(r=>{
+    const seed = sumSeedlings(n, plots, p => s.interrow[p]?.[r]);
+    h+=`<td>${seed ? seed.toLocaleString() : '—'}</td>`;
+  });
+  h+='</tr>';
+
+  // Maksimal Racun Guna — 1 decimal (same formula as P&D)
+  h+='<tr class="jumlah-tr"><td>Maksimal Racun Guna</td>';
+  rounds.forEach(r=>{
+    const c = cfg[r];
+    const seed = sumSeedlings(n, plots, p => s.interrow[p]?.[r]);
+    h+=`<td>${calcMaxChem(seed, c.chem, c.chem_dose, c.chem_unit, 1)}</td>`;
+  });
+  h+='</tr>';
+
+  // Maksimal Activator Guna — 1 decimal
+  h+='<tr class="jumlah-tr"><td>Maksimal Activator Guna</td>';
+  rounds.forEach(r=>{
+    const c = cfg[r];
+    const seed = sumSeedlings(n, plots, p => s.interrow[p]?.[r]);
+    const usage = (!seed || !c.activator_dose) ? '—' : calcMaxChem(seed, 'Activator', c.activator_dose, c.activator_unit, 1);
+    h+=`<td>${usage}</td>`;
+  });
   h+='</tr></tbody>';
   document.getElementById('interrow-table').innerHTML=h;
 }
@@ -1725,6 +1754,36 @@ function downloadPDF() {
     rounds.forEach((r, i) => {
       const x = startX + plotColW + i*colW;
       cell(x, y, colW, rowH, String(plots.filter(p=>s.interrow[p]?.[r]).length), {...PALETTE.summary, style:'bold', size:8});
+    });
+    y += rowH;
+
+    // Jumlah Bibit
+    cell(startX, y, plotColW, rowH, 'Jumlah Bibit', {...PALETTE.summaryDark, style:'bold', size:8});
+    rounds.forEach((r, i) => {
+      const x = startX + plotColW + i*colW;
+      const seed = sumSeedlings(pN, plots, p => s.interrow[p]?.[r]);
+      cell(x, y, colW, rowH, seed ? seed.toLocaleString() : '—', {...PALETTE.summary, size:8});
+    });
+    y += rowH;
+
+    // Max Racun Guna
+    cell(startX, y, plotColW, rowH, 'Max Racun Guna', {...PALETTE.summaryDark, style:'bold', size:7.5});
+    rounds.forEach((r, i) => {
+      const c = icfg[r];
+      const x = startX + plotColW + i*colW;
+      const seed = sumSeedlings(pN, plots, p => s.interrow[p]?.[r]);
+      cell(x, y, colW, rowH, calcMaxChem(seed, c.chem, c.chem_dose, c.chem_unit, 1), {...PALETTE.summary, style:'bold', size:8});
+    });
+    y += rowH;
+
+    // Max Activator Guna
+    cell(startX, y, plotColW, rowH, 'Max Activator Guna', {...PALETTE.summaryDark, style:'bold', size:7.5});
+    rounds.forEach((r, i) => {
+      const c = icfg[r];
+      const x = startX + plotColW + i*colW;
+      const seed = sumSeedlings(pN, plots, p => s.interrow[p]?.[r]);
+      const usage = (!seed || !c.activator_dose) ? '—' : calcMaxChem(seed, 'Activator', c.activator_dose, c.activator_unit, 1);
+      cell(x, y, colW, rowH, usage, {...PALETTE.summary, style:'bold', size:8});
     });
   }
 
